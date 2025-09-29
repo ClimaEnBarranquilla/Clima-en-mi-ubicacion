@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Clima en Tiempo Real — Barranquilla</title>
+  <style>
+    :root{
+      --bg:#eef2f7;
+      --card:#fff;
+      --accent:#2563eb;
+      --danger:#e11d48;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      color:#0f172a;
+    }
+    body{
+      margin:0;
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:linear-gradient(180deg,var(--bg),#f8fafc);
+      padding:24px;
+    }
+    .card{
+      width: min(820px,96vw);
+      background:var(--card);
+      border-radius:12px;
+      box-shadow:0 10px 30px rgba(16,24,40,0.08);
+      padding:18px;
+      box-sizing:border-box;
+    }
+    header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    h1{font-size:1.2rem;margin:0}
+    .controls{display:flex;gap:8px;align-items:center}
+    button{
+      border:0;background:var(--accent);color:white;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:600;
+      box-shadow:0 6px 12px rgba(37,99,235,0.12);
+    }
+    button.secondary{background:#64748b}
+    .grid{display:grid;grid-template-columns:1fr 220px;gap:16px;margin-top:14px;align-items:start}
+    .left{padding:8px}
+    .right{
+      background:#fbfdff;border-radius:10px;padding:12px;text-align:center;box-shadow:inset 0 1px 0 rgba(255,255,255,0.6);
+    }
+    .bigtemp{font-size:2.4rem;font-weight:700}
+    .small{color:#475569;font-size:0.95rem}
+    .info-row{display:flex;gap:10px;align-items:center;margin-top:8px}
+    .chip{background:#f1f5f9;padding:6px 8px;border-radius:8px;font-weight:600}
+    .alert{
+      margin-top:12px;padding:12px;border-radius:10px;color:white;font-weight:700;
+      display:flex;gap:10px;align-items:center;
+    }
+    .alert.warn{background:linear-gradient(90deg,#f97316,#fb923c)}
+    .alert.danger{background:linear-gradient(90deg,#ef4444,#dc2626)}
+    footer{margin-top:12px;display:flex;justify-content:space-between;align-items:center;color:#64748b;font-size:0.9rem}
+    .muted{color:#94a3b8}
+    label.switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer}
+    .small-btn{background:#e2e8f0;color:#0f172a;padding:6px 8px;border-radius:8px;border:0;cursor:pointer}
+    /* responsive */
+    @media (max-width:720px){
+      .grid{grid-template-columns:1fr;}
+      .right{order:-1}
+    }
+  </style>
+</head>
+<body>
+  <div class="card" role="application" aria-label="Escáner de clima en tiempo real">
+    <header>
+      <div>
+        <h1>Escáner de Clima en Tiempo Real — Barranquilla</h1>
+        <div class="small muted">Actualiza automáticamente y alerta sobre riesgo de tormenta</div>
+      </div>
+      <div class="controls">
+        <button id="refreshBtn">Actualizar ahora</button>
+        <button class="secondary" id="toggleLocationBtn">Usar mi ubicación</button>
+      </div>
+    </header>
+
+    <div class="grid">
+      <div class="left">
+        <div id="alertArea" aria-live="polite"></div>
+
+        <section style="margin-top:12px">
+          <div style="display:flex;justify-content:space-between;align-items:end;gap:12px">
+            <div>
+              <div style="font-size:1rem;font-weight:700" id="place">Barranquilla, Colombia</div>
+              <div class="small" id="coords">Lat: 10.9685, Lon: -74.7813</div>
+            </div>
+            <div style="text-align:right" class="small muted">Última actualización: <div id="updatedAt" style="font-weight:700"></div></div>
+          </div>
+
+          <div class="info-row" style="margin-top:12px">
+            <div class="chip" id="weatherDesc">—</div>
+            <div class="small">Viento: <strong id="wind">— m/s</strong></div>
+            <div class="small">Código: <strong id="wcode">—</strong></div>
+          </div>
+
+          <div style="margin-top:12px">
+            <div class="small">Pronóstico cercano (próximas 6 horas):</div>
+            <ul id="nearbyForecast" style="padding-left:18px;margin:6px 0 0 0;color:#0f172a"></ul>
+          </div>
+        </section>
+      </div>
+
+      <aside class="right" aria-hidden="false">
+        <div class="bigtemp" id="temp">— °C</div>
+        <div class="small" id="feel">—</div>
+        <div style="margin-top:8px">
+          <div class="small">Prob. precip.: <strong id="precProb">— %</strong></div>
+          <div class="small" style="margin-top:6px">Lluvia próxima: <strong id="precAmount">— mm</strong></div>
+        </div>
+
+        <div style="margin-top:12px">
+          <button class="small-btn" id="soundToggle">Sonido: OFF</button>
+        </div>
+      </aside>
+    </div>
+
+    <footer>
+      <div class="muted">Fuente: Open-Meteo (API pública)</div>
+      <div class="muted">Intervalo: <span id="intervalLabel">60s</span></div>
+    </footer>
+  </div>
+
+<script>
+/*
+  Escáner de clima — uso de Open-Meteo (sin API key)
+  - Cambia las coordenadas por defecto si quieres otro lugar.
+  - Intervalo de actualización (ms):
+*/
+const DEFAULT_COORDS = { lat: 10.9685, lon: -74.7813 }; // Barranquilla
+let coords = { ...DEFAULT_COORDS };
+let pollInterval = 60000; // 60s
+let pollTimer = null;
+let soundEnabled = false;
+
+// Elementos
+const tempEl = document.getElementById('temp');
+const feelEl = document.getElementById('feel');
+const windEl = document.getElementById('wind');
+const weatherDescEl = document.getElementById('weatherDesc');
+const wcodeEl = document.getElementById('wcode');
+const placeEl = document.getElementById('place');
+const coordsEl = document.getElementById('coords');
+const updatedAtEl = document.getElementById('updatedAt');
+const alertArea = document.getElementById('alertArea');
+const precProbEl = document.getElementById('precProb');
+const precAmountEl = document.getElementById('precAmount');
+const nearbyForecastEl = document.getElementById('nearbyForecast');
+const refreshBtn = document.getElementById('refreshBtn');
+const toggleLocationBtn = document.getElementById('toggleLocationBtn');
+const soundToggleBtn = document.getElementById('soundToggle');
+const intervalLabel = document.getElementById('intervalLabel');
+
+intervalLabel.textContent = Math.round(pollInterval/1000) + "s";
+
+// Mapeo simple de weathercodes de Open-Meteo
+function weatherCodeToText(code){
+  const map = {
+    0: 'Cielo despejado',
+    1: 'Parcialmente nublado',
+    2: 'Nublado',
+    3: 'Nublado/alto',
+    45: 'Niebla',
+    48: 'Deposición de escarcha',
+    51: 'Lluvia ligera',
+    53: 'Lluvia moderada',
+    55: 'Lluvia intensa',
+    56: 'Ll. ligera (congelada)',
+    57: 'Ll. intensa (congelada)',
+    61: 'Lluvia',
+    63: 'Lluvia moderada',
+    65: 'Lluvia fuerte',
+    66: 'Lluv. congelada ligera',
+    67: 'Lluv. congelada fuerte',
+    71: 'Nieve',
+    73: 'Nieve moderada',
+    75: 'Nieve fuerte',
+    77: 'Granizo',
+    80: 'Lluvias temporales',
+    81: 'Lluvias frecuentes',
+    82: 'Lluvias fuertes (tormenta)',
+    85: 'Aguanieve',
+    86: 'Aguanieve intensa',
+    95: 'Tormenta (ligera/moderada)',
+    96: 'Tormenta con granizo (leve)',
+    99: 'Tormenta con granizo (fuerte)'
+  };
+  return map[code] || 'Desconocido';
+}
+
+// Reproducir sonido de alerta (si está activado)
+function playAlertSound(){
+  if(!soundEnabled) return;
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = 'sine';
+  o.frequency.value = 880;
+  g.gain.value = 0.1;
+  o.connect(g); g.connect(ctx.destination);
+  o.start();
+  setTimeout(()=>{ o.stop(); ctx.close(); }, 500);
+}
+
+// Construye la URL de Open-Meteo para current + hourly
+function buildUrl(lat, lon){
+  const params = new URLSearchParams({
+    latitude: lat,
+    longitude: lon,
+    current_weather: 'true',
+    hourly: 'precipitation,precipitation_probability,weathercode',
+    timezone: 'auto'
+  });
+  return `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
+}
+
+// Analiza la respuesta y decide si hay riesgo de tormenta
+function analyzeWeather(data){
+  const cw = data.current_weather || {};
+  const hourly = data.hourly || {};
+  const times = hourly.time || [];
+  const prec = (hourly.precipitation || []).map(v => parseFloat(v || 0));
+  const precProb = (hourly.precipitation_probability || []).map(v => parseFloat(v || 0));
+  const codes = (hourly.weathercode || []).map(v => parseInt(v));
+
+  // encontrar índice de la hora actual aproximada en hourly.time
+  const nowISO = cw.time || new Date().toISOString();
+  let idx = times.indexOf(nowISO);
+  if(idx === -1){
+    // time formats may differ; fallback al primer índice futuro cercano:
+    const now = new Date();
+    idx = times.findIndex(t => new Date(t) >= now);
+    if(idx === -1) idx = 0;
+  }
+
+  // calculos para próximas horas (ej: 0..5 => próximas 6 horas)
+  const lookAhead = 6;
+  let precipSum = 0;
+  let maxProb = 0;
+  let thunderInHourly = false;
+
+  for(let i=idx;i<Math.min(idx+lookAhead, times.length);i++){
+    precipSum += (prec[i] || 0);
+    maxProb = Math.max(maxProb, precProb[i] || 0);
+    const code = codes[i];
+    if([95,96,99].includes(code)) thunderInHourly = true;
+  }
+
+  // Criterios de advertencia (ajustables)
+  const thunderNow = [95,96,99].includes(parseInt(cw.weathercode));
+  const probThreshold = 60; // % probabilidad alta
+  const precipThreshold = 5; // mm acumulada en próximas horas
+  const willStorm = thunderNow || thunderInHourly || (maxProb >= probThreshold) || (precipSum >= precipThreshold);
+
+  return {
+    cw,
+    precipSum,
+    maxProb,
+    willStorm,
+    thunderNow,
+    thunderInHourly,
+    idx,
+    timeslice: times.slice(idx, idx+lookAhead).map((t,i)=>({time:t, precipitation:prec[idx+i]||0, prob:precProb[idx+i]||0, code:codes[idx+i]||0}))
+  };
+}
+
+async function fetchAndRender(){
+  try{
+    const url = buildUrl(coords.lat, coords.lon);
+    // console.log('Fetch URL', url);
+    const res = await fetch(url);
+    if(!res.ok) throw new Error('Error al obtener datos: ' + res.status);
+    const data = await res.json();
+
+    // render básico
+    const analysis = analyzeWeather(data);
+    const cw = analysis.cw;
+
+    tempEl.textContent = cw.temperature !== undefined ? `${cw.temperature} °C` : '—';
+    feelEl.textContent = `Velocidad del viento: ${cw.windspeed ?? '—'} m/s`;
+    windEl.textContent = `${cw.windspeed ?? '—'} m/s`;
+    weatherDescEl.textContent = weatherCodeToText(cw.weathercode);
+    wcodeEl.textContent = cw.weathercode ?? '—';
+    placeEl.textContent = (coords.name) ? coords.name : 'Barranquilla, Colombia';
+    coordsEl.textContent = `Lat: ${coords.lat}, Lon: ${coords.lon}`;
+
+    const now = new Date();
+    updatedAtEl.textContent = now.toLocaleString();
+
+    precProbEl.textContent = Math.round(analysis.maxProb) + ' %';
+    precAmountEl.textContent = (analysis.precipSum || 0).toFixed(1) + ' mm';
+
+    // nearby forecast list
+    nearbyForecastEl.innerHTML = '';
+    analysis.timeslice.forEach(s => {
+      const li = document.createElement('li');
+      const t = new Date(s.time);
+      li.textContent = `${t.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} — ${s.precipitation} mm — ${Math.round(s.prob)}% — ${weatherCodeToText(s.code)}`;
+      nearbyForecastEl.appendChild(li);
+    });
+
+    // Alert logic
+    alertArea.innerHTML = '';
+    if(analysis.willStorm){
+      const node = document.createElement('div');
+      node.className = 'alert danger';
+      node.innerHTML = `⚠️ <div style="flex:1">Riesgo de tormenta detectado. Probabilidad máxima ${Math.round(analysis.maxProb)}%, lluvia próxima ${analysis.precipSum.toFixed(1)} mm.</div>`;
+      alertArea.appendChild(node);
+      playAlertSound();
+    } else if(analysis.maxProb >= 40 || analysis.precipSum >= 2){
+      const node = document.createElement('div');
+      node.className = 'alert warn';
+      node.innerHTML = `ℹ️ <div style="flex:1">Condiciones para lluvia detectadas. Probabilidad ${Math.round(analysis.maxProb)}%.</div>`;
+      alertArea.appendChild(node);
+      if(analysis.maxProb >= 50) playAlertSound();
+    } else {
+      const node = document.createElement('div');
+      node.className = 'alert';
+      node.style.background = 'linear-gradient(90deg,#10b981,#06b6d4)';
+      node.textContent = '✅ Sin riesgo inmediato de tormenta en las próximas horas.';
+      alertArea.appendChild(node);
+    }
+
+  }catch(err){
+    console.error(err);
+    alertArea.innerHTML = '';
+    const node = document.createElement('div');
+    node.className = 'alert warn';
+    node.innerHTML = `❗ Error al obtener datos: ${err.message || err}`;
+    alertArea.appendChild(node);
+  }
+}
+
+// Polling
+function startPolling(){
+  if(pollTimer) clearInterval(pollTimer);
+  fetchAndRender(); // primera llamada inmediata
+  pollTimer = setInterval(fetchAndRender, pollInterval);
+}
+function stopPolling(){ if(pollTimer) clearInterval(pollTimer); pollTimer = null; }
+
+// Event listeners
+refreshBtn.addEventListener('click', fetchAndRender);
+soundToggleBtn.addEventListener('click', ()=> {
+  soundEnabled = !soundEnabled;
+  soundToggleBtn.textContent = `Sonido: ${soundEnabled? 'ON' : 'OFF'}`;
+});
+toggleLocationBtn.addEventListener('click', async ()=>{
+  // Intentar usar geolocalización; si falla, mantener coord por defecto.
+  if(!navigator.geolocation){
+    alert('Tu navegador no soporta geolocalización.');
+    return;
+  }
+  toggleLocationBtn.disabled = true;
+  toggleLocationBtn.textContent = 'Obteniendo ubicación...';
+  navigator.geolocation.getCurrentPosition(pos => {
+    coords.lat = pos.coords.latitude.toFixed(6);
+    coords.lon = pos.coords.longitude.toFixed(6);
+    coords.name = 'Ubicación actual';
+    toggleLocationBtn.textContent = 'Usar mi ubicación';
+    toggleLocationBtn.disabled = false;
+    fetchAndRender();
+  }, err => {
+    toggleLocationBtn.disabled = false;
+    toggleLocationBtn.textContent = 'Usar mi ubicación';
+    alert('No se pudo obtener la ubicación: ' + (err.message || err.code));
+  }, { enableHighAccuracy:true, timeout:15000 });
+});
+
+// Inicializa con Barranquilla y arranca polling
+coords = { ...DEFAULT_COORDS, name: 'Barranquilla, Colombia' };
+startPolling();
+
+</script>
+</body>
+</html>
